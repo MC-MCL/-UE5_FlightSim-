@@ -1,0 +1,345 @@
+# 虚幻引擎5 飞行模拟器 - 完整制作指南
+
+## 📦 项目信息
+- **项目名称**: FlightSimulator
+- **引擎版本**: UE 5.3 或 5.4
+- **开发语言**: C++
+- **目标平台**: Windows 桌面
+
+---
+
+## 🚀 安装步骤
+
+### 1. 安装Epic Games Launcher
+1. 访问: https://www.epicgames.com/store/zh-CN/download
+2. 下载并安装Epic Games Launcher
+3. 安装完成后打开Launcher
+
+### 2. 安装虚幻引擎5
+1. 在Launcher中点击左侧 **"虚幻引擎"**
+2. 点击右上角 **"+" 安装引擎"**
+3. 选择版本 **5.3** 或 **5.4**
+4. 点击 **"安装"**，选择安装路径（需要30-50GB空间）
+5. 等待下载安装完成
+
+### 3. 创建项目
+1. 安装完成后，点击 **"启动"** 打开UE5编辑器
+2. 点击 **"游戏"** → **"空白模板"**
+3. 项目设置:
+   - **蓝图或C++**: 选择 **C++**
+   - **目标平台**: 桌面
+   - **质量预设**: 电影级
+   - **启动内容**: 包含
+4. 项目名称: `FlightSimulator`
+5. 选择保存位置（建议路径不含中文）
+6. 点击 **"创建"**
+
+---
+
+## 📝 C++代码文件
+
+创建项目后，你需要添加以下C++类。我会为每个类提供完整代码。
+
+### 文件1: `AirplanePawn.h` (飞行器Pawn头文件)
+```cpp
+// AirplanePawn.h
+#pragma once
+
+#include "CoreMinimal.h"
+#include "GameFramework/Pawn.h"
+#include "AirplanePawn.generated.h"
+
+UCLASS()
+class FLIGHTSIMULATOR_API AAirplanePawn : public APawn
+{
+    GENERATED_BODY()
+
+public:
+    AAirplanePawn();
+
+protected:
+    virtual void BeginPlay() override;
+
+public:
+    virtual void Tick(float DeltaTime) override;
+    virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
+
+    // 组件
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Components")
+    class UStaticMeshComponent* AirplaneMesh;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Components")
+    class USpringArmComponent* SpringArm;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Components")
+    class UCameraComponent* Camera;
+
+    // 飞行参数
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight")
+    float MaxSpeed = 2000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight")
+    float MinSpeed = 200.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight")
+    float ThrottleSpeed = 500.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight")
+    float PitchSpeed = 50.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight")
+    float YawSpeed = 50.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight")
+    float RollSpeed = 50.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight")
+    float LiftCoefficient = 5.0f;
+
+    // 当前状态
+    float CurrentThrottle;
+    float CurrentPitch;
+    float CurrentYaw;
+    float CurrentRoll;
+
+private:
+    void MoveForward(float Value);
+    void MoveRight(float Value);
+    void Pitch(float Value);
+    void Yaw(float Value);
+    void Roll(float Value);
+    void ThrottleUp();
+    void ThrottleDown();
+    void Ascend(float Value);
+};
+```
+
+### 文件2: `AirplanePawn.cpp` (飞行器Pawn实现文件)
+```cpp
+// AirplanePawn.cpp
+#include "AirplanePawn.h"
+#include "Components/StaticMeshComponent.h"
+#include "Camera/CameraComponent.h"
+#include "GameFramework/SpringArmComponent.h"
+#include "Components/InputComponent.h"
+#include "Engine/Engine.h"
+
+AAirplanePawn::AAirplanePawn()
+{
+    PrimaryActorTick.bCanEverTick = true;
+
+    // 创建网格体组件
+    AirplaneMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("AirplaneMesh"));
+    RootComponent = AirplaneMesh;
+    AirplaneMesh->SetSimulatePhysics(true);
+    AirplaneMesh->SetMassOverrideInKg(NAME_None, 1000.0f);
+
+    // 创建弹簧臂
+    SpringArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("SpringArm"));
+    SpringArm->SetupAttachment(RootComponent);
+    SpringArm->TargetArmLength = 500.0f;
+    SpringArm->bUsePawnControlRotation = false;
+
+    // 创建摄像机
+    Camera = CreateDefaultSubobject<UCameraComponent>(TEXT("Camera"));
+    Camera->SetupAttachment(SpringArm, USpringArmComponent::SocketName);
+
+    // 初始化状态
+    CurrentThrottle = 0.0f;
+    CurrentPitch = 0.0f;
+    CurrentYaw = 0.0f;
+    CurrentRoll = 0.0f;
+}
+
+void AAirplanePawn::BeginPlay()
+{
+    Super::BeginPlay();
+}
+
+void AAirplanePawn::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+
+    // 应用推力
+    FVector Forward = GetActorForwardVector();
+    FVector ThrustForce = Forward * CurrentThrottle * ThrottleSpeed;
+    AirplaneMesh->AddForce(ThrustForce);
+
+    // 应用升力（基于速度）
+    FVector Velocity = AirplaneMesh->GetPhysicsLinearVelocity();
+    float Speed = Velocity.Size();
+    if (Speed > 100.0f)
+    {
+        float Lift = Speed * LiftCoefficient;
+        FVector LiftForce = FVector(0, 0, Lift);
+        AirplaneMesh->AddForce(LiftForce);
+    }
+
+    // 应用旋转
+    FRotator RotationDelta = FRotator(CurrentPitch * PitchSpeed, CurrentYaw * YawSpeed, CurrentRoll * RollSpeed) * DeltaTime;
+    AddActorLocalRotation(FRotator(RotationDelta.Pitch, RotationDelta.Yaw, RotationDelta.Roll));
+}
+
+void AAirplanePawn::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
+{
+    Super::SetupPlayerInputComponent(PlayerInputComponent);
+
+    // 绑定轴映射
+    PlayerInputComponent->BindAxis("MoveForward", this, &AAirplanePawn::MoveForward);
+    PlayerInputComponent->BindAxis("MoveRight", this, &AAirplanePawn::MoveRight);
+    PlayerInputComponent->BindAxis("Pitch", this, &AAirplanePawn::Pitch);
+    PlayerInputComponent->BindAxis("Yaw", this, &AAirplanePawn::Yaw);
+    PlayerInputComponent->BindAxis("Roll", this, &AAirplanePawn::Roll);
+    PlayerInputComponent->BindAxis("Ascend", this, &AAirplanePawn::Ascend);
+
+    // 绑定动作映射
+    PlayerInputComponent->BindAction("ThrottleUp", IE_Pressed, this, &AAirplanePawn::ThrottleUp);
+    PlayerInputComponent->BindAction("ThrottleDown", IE_Pressed, this, &AAirplanePawn::ThrottleDown);
+}
+
+void AAirplanePawn::MoveForward(float Value)
+{
+    // 已由Tick中的推力处理
+}
+
+void AAirplanePawn::MoveRight(float Value)
+{
+    // 横移（可选）
+    FVector Right = GetActorRightVector();
+    AirplaneMesh->AddForce(Right * Value * 50000.0f);
+}
+
+void AAirplanePawn::Pitch(float Value)
+{
+    CurrentPitch = Value;
+}
+
+void AAirplanePawn::Yaw(float Value)
+{
+    CurrentYaw = Value;
+}
+
+void AAirplanePawn::Roll(float Value)
+{
+    CurrentRoll = Value;
+}
+
+void AAirplanePawn::ThrottleUp()
+{
+    CurrentThrottle = FMath::Clamp(CurrentThrottle + 0.1f, 0.0f, 1.0f);
+}
+
+void AAirplanePawn::ThrottleDown()
+{
+    CurrentThrottle = FMath::Clamp(CurrentThrottle - 0.1f, 0.0f, 1.0f);
+}
+
+void AAirplanePawn::Ascend(float Value)
+{
+    FVector Up = GetActorUpVector();
+    AirplaneMesh->AddForce(Up * Value * 50000.0f);
+}
+```
+
+### 文件3: `FlightSimulatorGameMode.h` (游戏模式头文件)
+```cpp
+// FlightSimulatorGameMode.h
+#pragma once
+
+#include "CoreMinimal.h"
+#include "GameFramework/GameModeBase.h"
+#include "FlightSimulatorGameMode.generated.h"
+
+UCLASS()
+class FLIGHTSIMULATOR_API AFlightSimulatorGameMode : public AGameModeBase
+{
+    GENERATED_BODY()
+
+public:
+    AFlightSimulatorGameMode();
+};
+```
+
+### 文件4: `FlightSimulatorGameMode.cpp` (游戏模式实现文件)
+```cpp
+// FlightSimulatorGameMode.cpp
+#include "FlightSimulatorGameMode.h"
+#include "AirplanePawn.h"
+
+AFlightSimulatorGameMode::AFlightSimulatorGameMode()
+{
+    DefaultPawnClass = AAirplanePawn::StaticClass();
+}
+```
+
+---
+
+## ⚙️ 项目配置
+
+### 1. 输入设置 (Input Setup)
+
+打开 **项目设置** → **Input**，添加以下轴映射和动作映射:
+
+**Axis Mappings (轴映射):**
+- `MoveForward` - W (Scale 1.0), S (Scale -1.0)
+- `MoveRight` - D (Scale 1.0), A (Scale -1.0)
+- `Pitch` - Up (Scale 1.0), Down (Scale -1.0)
+- `Yaw` - Mouse X (Scale 1.0)
+- `Roll` - Q (Scale -1.0), E (Scale 1.0)
+- `Ascend` - Space (Scale 1.0), LeftShift (Scale -1.0)
+
+**Action Mappings (动作映射):**
+- `ThrottleUp` - W (或右键)
+- `ThrottleDown` - S (或左键)
+
+### 2. 编译项目
+1. 在UE5编辑器中，点击 **"编译"** 按钮
+2. 或者，右键项目文件夹 → **"Generate Visual Studio project files"**
+3. 打开 `.sln` 文件，用Visual Studio编译
+
+---
+
+## 🎮 场景搭建
+
+### 1. 添加飞行器
+1. 编译完成后，在内容浏览器中找到 `BP_AirplanePawn` (自动生成的蓝图)
+2. 拖拽到场景中
+3. 点击 **"Play"** 测试！
+
+### 2. 创建3D场景
+1. **地形**: 放置 `Landscape`，用雕刻工具创建山脉
+2. **天空**: 添加 `Sky Atmosphere` + `Directional Light`
+3. **建筑**: 从Marketplace下载免费资源包，或拖拽自带几何体
+4. **特效**: 添加 `Niagara` 粒子系统（云层、引擎尾气）
+
+---
+
+## 📦 打包游戏
+
+1. 点击 **"文件"** → **"打包项目"** → **"Windows"**
+2. 选择输出目录
+3. 等待打包完成（生成 `.exe` 文件）
+4. 分享给朋友，像市面游戏一样运行！
+
+---
+
+## 🆘 常见问题
+
+### Q: 编译失败？
+- 检查Visual Studio是否安装了 **"使用C++的桌面开发"** 工作负载
+- 重启UE5编辑器
+- 删除 `Intermediate` 和 `Binaries` 文件夹，重新生成项目文件
+
+### Q: 飞行器不受控制？
+- 检查输入设置是否正确
+- 确保 `AirplaneMesh` 的 `Simulate Physics` 已启用
+- 调整 `ThrottleSpeed`, `PitchSpeed` 等参数
+
+### Q: 画面卡顿？
+- 降低渲染质量（项目设置 → 引擎可扩展性）
+- 减少场景中的多边形数量
+- 关闭实时光照和阴影
+
+---
+
+
